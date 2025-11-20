@@ -35,7 +35,8 @@ class WeibostoreFactory:
     def create_store() -> AbstractStore:
         store_class = WeibostoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
-            raise ValueError("[WeibotoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb ...")
+            raise ValueError(
+                "[WeibotoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb ...")
         return store_class()
 
 
@@ -65,8 +66,8 @@ async def update_weibo_note(note_item: Dict):
     """
     if not note_item:
         return
-
     mblog: Dict = note_item.get("mblog")
+    is_long = True if mblog.get("pic_num") > 9 else mblog.get("isLongText")
     user_info: Dict = mblog.get("user")
     note_id = mblog.get("id")
     content_text = mblog.get("text")
@@ -84,6 +85,11 @@ async def update_weibo_note(note_item: Dict):
         "note_url": f"https://m.weibo.cn/detail/{note_id}",
         "ip_location": mblog.get("region_name", "").replace("发布于 ", ""),
 
+        "is_long_weibo": is_long,
+        "pics": mblog.get("pics", []),
+        # "live_photo": mblog.get("live_photo", []),
+        "media_info": mblog.get("page_info", {}).get("media_info", {}),
+
         # 用户信息
         "user_id": str(user_info.get("id")),
         "nickname": user_info.get("screen_name", ""),
@@ -92,7 +98,8 @@ async def update_weibo_note(note_item: Dict):
         "avatar": user_info.get("profile_image_url", ""),
         "source_keyword": source_keyword_var.get(),
     }
-    utils.logger.info(f"[store.weibo.update_weibo_note] weibo note id:{note_id}, title:{save_content_item.get('content')[:24]} ...")
+    utils.logger.info(
+        f"[store.weibo.update_weibo_note] weibo note id:{note_id}, title:{save_content_item.get('content')[:24]} ...")
     await WeibostoreFactory.create_store().store_content(content_item=save_content_item)
 
 
@@ -147,7 +154,8 @@ async def update_weibo_note_comment(note_id: str, comment_item: Dict):
         "profile_url": user_info.get("profile_url", ""),
         "avatar": user_info.get("profile_image_url", ""),
     }
-    utils.logger.info(f"[store.weibo.update_weibo_note_comment] Weibo note comment: {comment_id}, content: {save_comment_item.get('content', '')[:24]} ...")
+    utils.logger.info(
+        f"[store.weibo.update_weibo_note_comment] Weibo note comment: {comment_id}, content: {save_comment_item.get('content', '')[:24]} ...")
     await WeibostoreFactory.create_store().store_comment(comment_item=save_comment_item)
 
 
@@ -162,7 +170,7 @@ async def update_weibo_note_image(picid: str, pic_content, extension_file_name):
     Returns:
 
     """
-    await WeiboStoreImage().store_image({"pic_id": picid, "pic_content": pic_content, "extension_file_name": extension_file_name})
+    return await WeiboStoreImage().store_image({"pic_id": picid, "pic_content": pic_content, "extension_file_name": extension_file_name})
 
 
 async def save_creator(user_id: str, user_info: Dict):
@@ -187,5 +195,18 @@ async def save_creator(user_id: str, user_info: Dict):
         'tag_list': '',
         "last_modify_ts": utils.get_current_timestamp(),
     }
-    utils.logger.info(f"[store.weibo.save_creator] creator:{local_db_item}")
+    # utils.logger.info(f"[store.weibo.save_creator] creator:{local_db_item}")
     await WeibostoreFactory.create_store().store_creator(local_db_item)
+
+
+async def get_creator(user_id: str):
+    """
+    Save creator information to local
+    Args:
+        user_id:
+
+    Returns:
+
+    """
+
+    return await WeibostoreFactory.create_store().get_creator(user_id)

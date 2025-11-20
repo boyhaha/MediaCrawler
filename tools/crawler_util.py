@@ -1,12 +1,12 @@
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：  
-# 1. 不得用于任何商业用途。  
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。  
-# 3. 不得进行大规模爬取或对平台造成运营干扰。  
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。   
+# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
+# 1. 不得用于任何商业用途。
+# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
+# 3. 不得进行大规模爬取或对平台造成运营干扰。
+# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
 # 5. 不得用于任何非法或不当的用途。
-#   
-# 详细许可条款请参阅项目根目录下的LICENSE文件。  
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。  
+#
+# 详细许可条款请参阅项目根目录下的LICENSE文件。
+# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 
 # -*- coding: utf-8 -*-
@@ -15,6 +15,7 @@
 # @Desc    : 爬虫相关的工具函数
 
 import base64
+from datetime import datetime
 import json
 import random
 import re
@@ -195,6 +196,7 @@ def extract_text_from_html(html: str) -> str:
     clean_text = re.sub(r'<[^>]+>', '', clean_html).strip()
     return clean_text
 
+
 def extract_url_params_to_dict(url: str) -> Dict:
     """Extract URL parameters to dict"""
     url_params_dict = dict()
@@ -203,3 +205,35 @@ def extract_url_params_to_dict(url: str) -> Dict:
     parsed_url = urllib.parse.urlparse(url)
     url_params_dict = dict(urllib.parse.parse_qsl(parsed_url.query))
     return url_params_dict
+
+
+def get_time_factor():
+    h = datetime.now().hour
+    if 1 <= h <= 5:
+        return 1.5
+    if 12 <= h <= 14:
+        return 1.3
+    return 1.0
+
+
+async def human_sleep(base: float):
+    """
+    base: 基础等待时间（如每条间隔 5 秒）
+    """
+
+    # 1. 获取时间系数（深夜 / 午休更慢）
+    factor = get_time_factor()
+
+    # 2. 微抖动（每次都有）
+    micro = random.uniform(0.2, 1.5)
+
+    # 3. 概率触发中抖动
+    mid = random.uniform(1, 3) if random.random() < 0.15 else 0
+
+    # 4. 概率触发大抖动（模拟人离开电脑）
+    large = random.uniform(5, 20) if random.random() < 0.03 else 0
+
+    # 5. 合成最终 sleep
+    sleep_time = (base + micro + mid + large) * factor
+
+    return sleep_time

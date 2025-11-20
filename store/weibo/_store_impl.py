@@ -167,6 +167,22 @@ class WeiboDbStoreImplement(AbstractStore):
                 db_creator = WeiboCreator(**creator)
                 session.add(db_creator)
             await session.commit()
+    
+    async def get_creator(self, user_id: str) -> Dict:
+        """
+        Get creator information from DB
+        Args:
+            user_id:
+
+        Returns:
+            creator dict
+        """
+        async with get_session() as session:
+            stmt = select(WeiboCreator).where(WeiboCreator.user_id == user_id)
+            res = await session.execute(stmt)
+            db_creator = res.scalar_one_or_none()
+            if db_creator:
+                return db_creator
 
 
 class WeiboJsonStoreImplement(AbstractStore):

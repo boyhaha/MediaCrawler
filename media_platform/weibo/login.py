@@ -121,3 +121,8 @@ class WeiboLogin(AbstractLogin):
                 'domain': ".weibo.cn",
                 'path': "/"
             }])
+
+    async def login_by_account(self):
+        utils.logger.info("[WeiboLogin.login_by_account] Begin login weibo by account ...")
+        pass
+

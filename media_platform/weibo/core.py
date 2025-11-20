@@ -17,6 +17,7 @@ import asyncio
 import os
 # import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
 from asyncio import Task
+import random
 from typing import Dict, List, Optional, Tuple
 
 from playwright.async_api import (
@@ -85,9 +86,7 @@ class WeiboCrawler(AbstractCrawler):
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url)
             await asyncio.sleep(2)
-
            
-            # Create a client to interact with the xiaohongshu website.
             self.wb_client = await self.create_weibo_client(httpx_proxy_format)
             if not await self.wb_client.pong():
                 login_obj = WeiboLogin(
@@ -95,7 +94,7 @@ class WeiboCrawler(AbstractCrawler):
                     login_phone="",  # your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=config.COOKIES,  # TODO: 代理和coocki绑定
                 )
                 await login_obj.begin()
 
@@ -287,31 +286,31 @@ class WeiboCrawler(AbstractCrawler):
 
         """
         utils.logger.info("[WeiboCrawler.get_creators_and_notes] Begin get weibo creators")
-        for user_id in config.WEIBO_CREATOR_ID_LIST:
+        for user_id in random.shuffle(config.WEIBO_CREATOR_ID_LIST):
             createor_info_res: Dict = await self.wb_client.get_creator_info_by_id(creator_id=user_id)
             if createor_info_res:
                 createor_info: Dict = createor_info_res.get("userInfo", {})
-                utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] creator info: {createor_info}")
+                # utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] creator info: {createor_info}")
                 if not createor_info:
                     raise DataFetchError("Get creator info error")
-                await weibo_store.save_creator(user_id, user_info=createor_info)
 
                 # Get all note information of the creator
                 all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
                     creator_id=user_id,
                     container_id=f"107603{user_id}",
-                    crawl_interval=0,
-                    callback=weibo_store.batch_update_weibo_notes,
+                    crawl_interval=config.CRAWL_INTERVAL,
                 )
+                await weibo_store.save_creator(user_id, user_info=createor_info)
 
-                note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]
-                await self.batch_get_notes_comments(note_ids)
-
+                # 评论
+                # note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]
+                # await self.batch_get_notes_comments(note_ids)
+                await asyncio.sleep(utils.human_sleep(config.CRAWL_INTERVAL))
             else:
                 utils.logger.error(f"[WeiboCrawler.get_creators_and_notes] get creator info error, creator_id:{user_id}")
 
     async def create_weibo_client(self, httpx_proxy: Optional[str]) -> WeiboClient:
-        """Create xhs client"""
+        """Create weibo client"""
         utils.logger.info("[WeiboCrawler.create_weibo_client] Begin create weibo API client ...")
         cookie_str, cookie_dict = utils.convert_cookies(await self.browser_context.cookies(urls=[self.mobile_index_url]))
         weibo_client_obj = WeiboClient(

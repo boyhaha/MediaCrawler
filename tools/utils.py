@@ -17,23 +17,52 @@ from .slider_util import *
 from .time_util import *
 
 
+# app/core/logger.py
+import sys
+from loguru import logger as loguru_logger
+
 def init_loging_config():
     level = logging.INFO
+
+    # ------------------ loguru 文件输出 ------------------
+    loguru_logger.remove()  # 移除默认 handler
+
+    # 文件日志，保留14天
+    loguru_logger.add(
+        "logs/media_crawler.log",
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+        rotation="1 day",
+        retention="14 days",
+        encoding="utf-8"
+    )
+
+    # ------------------ logging 拦截到 loguru ------------------
+    class InterceptHandler(logging.Handler):
+        def emit(self, record):
+            # 获取 loguru 对象，并保持原调用堆栈深度
+            logger_opt = loguru_logger.opt(depth=6, exception=record.exc_info)
+            logger_opt.log(record.levelname, record.getMessage())
+
     logging.basicConfig(
+        handlers=[InterceptHandler(), logging.StreamHandler(sys.stdout)],  # 控制台依然输出
         level=level,
         format="%(asctime)s %(name)s %(levelname)s (%(filename)s:%(lineno)d) - %(message)s",
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        force=True
     )
+
     _logger = logging.getLogger("MediaCrawler")
     _logger.setLevel(level)
 
-    # 关闭 httpx 的 INFO 日志
+    # httpx 只显示 WARNING 及以上
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     return _logger
 
 
 logger = init_loging_config()
+
 
 def str2bool(v):
     if isinstance(v, bool):

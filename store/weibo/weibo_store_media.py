@@ -34,7 +34,7 @@ class WeiboStoreImage(AbstractStoreImage):
         Returns:
 
         """
-        await self.save_image(image_content_item.get("pic_id"), image_content_item.get("pic_content"), image_content_item.get("extension_file_name"))
+        return await self.save_image(image_content_item.get("pic_id"), image_content_item.get("pic_content"), image_content_item.get("extension_file_name"))
 
     def make_save_file_name(self, picid: str, extension_file_name: str) -> str:
         """
@@ -63,6 +63,8 @@ class WeiboStoreImage(AbstractStoreImage):
         """
         pathlib.Path(self.image_store_path).mkdir(parents=True, exist_ok=True)
         save_file_name = self.make_save_file_name(picid, extension_file_name)
-        async with aiofiles.open(save_file_name, 'wb') as f:
-            await f.write(pic_content)
-            utils.logger.info(f"[WeiboImageStoreImplement.save_image] save image {save_file_name} success ...")
+        if not pathlib.Path(save_file_name).exists():
+            async with aiofiles.open(save_file_name, 'wb') as f:
+                await f.write(pic_content)
+                # utils.logger.info(f"[WeiboImageStoreImplement.save_image] save image {save_file_name} success ...")
+        return save_file_name

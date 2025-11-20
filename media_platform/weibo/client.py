@@ -16,20 +16,23 @@
 import asyncio
 import copy
 import json
+import random
 import re
+import time
 from typing import Callable, Dict, List, Optional, Union
 from urllib.parse import parse_qs, unquote, urlencode
 
 import httpx
 from httpx import Response
 from playwright.async_api import BrowserContext, Page
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed
 
 import config
 from tools import utils
 
 from .exception import DataFetchError
 from .field import SearchType
+from store import weibo as weibo_store
 
 
 class WeiboClient:
@@ -51,7 +54,7 @@ class WeiboClient:
         self.cookie_dict = cookie_dict
         self._image_agent_host = "https://i1.wp.com/"
 
-    @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=5, max=300))
     async def request(self, method, url, **kwargs) -> Union[Response, Dict]:
         enable_return_response = kwargs.pop("return_response", False)
         async with httpx.AsyncClient(proxy=self.proxy) as client:
@@ -73,7 +76,7 @@ class WeiboClient:
         ok_code = data.get("ok")
         if ok_code == 0:  # response error
             utils.logger.error(f"[WeiboClient.request] request {method}:{url} err, res:{data}")
-            raise DataFetchError(data.get("msg", "response error"))
+            # raise DataFetchError(data.get("msg", "response error"))
         elif ok_code != 1:  # unknown error
             utils.logger.error(f"[WeiboClient.request] request {method}:{url} err, res:{data}")
             raise DataFetchError(data.get("msg", "unknown error"))
@@ -318,7 +321,7 @@ class WeiboClient:
             "jumpfrom": "weibocom",
             "type": "uid",
             "value": creator_id,
-            "containerid":containerid,
+            "containerid": containerid,
         }
         user_res = await self.get(uri, params)
         return user_res
@@ -349,12 +352,27 @@ class WeiboClient:
         }
         return await self.get(uri, params)
 
+    async def get_user_last_ts(self, creator_id: str) -> int:
+        """
+        获取用户的最后修改时间戳
+        Args:
+            creator_id:
+
+        Returns:
+
+        """
+        creator_info = await weibo_store.WeibostoreFactory.create_store().get_creator(creator_id)
+        user_last_ts = 0
+        if creator_info:
+            user_last_ts = creator_info.last_modify_ts or 0 // 1000
+        user_last_ts = user_last_ts or utils.get_unix_timestamp() - 60 * 60 * 1
+        return user_last_ts
+
     async def get_all_notes_by_creator_id(
         self,
         creator_id: str,
         container_id: str,
         crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
     ) -> List[Dict]:
         """
         获取指定用户下的所有发过的帖子，该方法会一直查找一个用户下的所有帖子信息
@@ -370,8 +388,10 @@ class WeiboClient:
         result = []
         notes_has_more = True
         since_id = ""
+        last_modify_ts = await self.get_user_last_ts(creator_id)
         crawler_total_count = 0
         while notes_has_more:
+            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] Fetching notes for user_id:{creator_id} with since_id:{since_id} ...")
             notes_res = await self.get_notes_by_creator(creator_id, container_id, since_id)
             if not notes_res:
                 utils.logger.error(f"[WeiboClient.get_notes_by_creator] The current creator may have been banned by xhs, so they cannot access the data.")
@@ -382,12 +402,130 @@ class WeiboClient:
                 break
 
             notes = notes_res["cards"]
-            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] got user_id:{creator_id} notes len : {len(notes)}")
+            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] got user_id: {creator_id} notes len : {len(notes)}")
             notes = [note for note in notes if note.get("card_type") == 9]
-            if callback:
-                await callback(notes)
-            await asyncio.sleep(crawl_interval)
+            is_continue = await self.batch_update_weibo_notes(notes, last_modify_ts)
+            if not is_continue or since_id == "0" or not notes:
+                utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] Stopping fetch for user_id:{creator_id}. is_continue:{is_continue}, since_id:{since_id}, notes_len:{len(notes)}")
+                break
+
+            await asyncio.sleep(utils.human_sleep(crawl_interval))
             result.extend(notes)
             crawler_total_count += 10
             notes_has_more = notes_res.get("cardlistInfo", {}).get("total", 0) > crawler_total_count
         return result
+
+    async def batch_update_weibo_notes(self, note_list: List[Dict], last_modify_ts: int):
+        """
+        Batch update weibo notes
+        Args:
+            note_list:
+        Returns:
+        """
+        if not note_list:
+            return
+        is_continue = True
+        for note_item in note_list:
+            is_top, is_new = await self.parse_check(note_item, last_modify_ts)
+            if not is_top and not is_new:  # 如果不是置顶且不是新发布的，就停止爬取
+                is_continue = False
+                # break
+            # if is_new:
+            #     await self.parse_note(note_item)
+            await self.parse_note(note_item)
+        return is_continue
+    
+    async def parse_check(self, note_item: Dict, last_modify_ts: int):
+        """
+        解析单个微博帖子的详情
+        Args:
+            note_item:
+
+        Returns:
+
+        """
+        mblog: Dict = note_item.get("mblog")
+        is_top, is_new = False, False
+        top = mblog.get("title")
+        if "置顶" in str(top):
+            is_top = True
+        if utils.rfc2822_to_timestamp(mblog.get("created_at")) > last_modify_ts:
+            is_new = True
+        return is_top, is_new
+    
+    async def parse_note(self, note_item: Dict) -> Dict:
+        """
+        解析单个微博帖子的详情
+        Args:
+            note_item:
+
+        Returns:
+
+        """
+        mblog: Dict = note_item.get("mblog")
+        user_info: Dict = mblog.get("user")
+        note_id = mblog.get("id")
+        clean_text = re.sub(r"<.*?>", "", mblog.get("text"))
+        content_item = {
+            # 微博信息
+            "note_id": note_id,
+            "content": clean_text,
+            "create_time": utils.rfc2822_to_timestamp(mblog.get("created_at")),
+            "create_date_time": str(utils.rfc2822_to_china_datetime(mblog.get("created_at"))),
+            "liked_count": str(mblog.get("attitudes_count", 0)),
+            "comments_count": str(mblog.get("comments_count", 0)),
+            "shared_count": str(mblog.get("reposts_count", 0)),
+            "last_modify_ts": utils.get_current_timestamp(),
+            "note_url": f"https://m.weibo.cn/detail/{note_id}",
+            "ip_location": mblog.get("region_name", "").replace("发布于 ", ""),
+
+            "pics": await self._note_pics(mblog),
+            # "live_photo": mblog.get("live_photo", []),  # TODO：暂不处理动态图片
+            "media_info": mblog.get("page_info", {}).get("media_info", {}),  # TODO：暂不处理视频
+
+            # 用户信息
+            "user_id": str(user_info.get("id")),
+            "nickname": user_info.get("screen_name", ""),
+            "gender": '女' if user_info.get('gender') == "f" else '男',
+            "profile_url": user_info.get("profile_url", ""),
+            "avatar": user_info.get("profile_image_url", ""),  # TODO：用户头像是否下载
+        }
+
+        is_long = True if mblog.get("pic_num") > 9 else mblog.get("isLongText")
+        if is_long:
+            content_item["is_long"] = is_long
+            note_detail = await self.get_note_info_by_id(note_id)
+            content_item["full_text"] = re.sub(r"<.*?>", "", note_detail.get("mblog", {}).get("text", ""))
+        # TODO：批量保存
+        utils.logger.info(f"[store.weibo.update_weibo_note] weibo note id:{note_id}, title:{clean_text[:24]} ...")
+        await weibo_store.WeibostoreFactory.create_store().store_content(content_item=content_item)
+    
+    async def _note_pics(self, mblog: Dict):
+        """
+        get note images
+        :param mblog:
+        :return:
+        """
+        pics = []
+
+        note_pics = mblog.get("pics")
+        if not note_pics:
+            return pics
+        for note_pic in note_pics:
+            url = note_pic.get("url")
+            if not url:
+                continue
+            _pic = {
+                    "pic_id": note_pic["pid"],
+                    "pic_url": url,
+                    "pic_path": "",
+                }
+            if config.ENABLE_GET_MEIDAS:
+                content = await self.get_note_image(url)
+                await asyncio.sleep(config.CRAWL_INTERVAL)
+                # utils.logger.info(f"[WeiboCrawler._note_pics] Sleeping for {config.CRAWL_INTERVAL} seconds after fetching image")
+                if content != None:
+                    extension_file_name = url.split(".")[-1]
+                    _pic["pic_path"] = await weibo_store.update_weibo_note_image(note_pic["pid"], content, extension_file_name)
+            pics.append(_pic)
+        return pics
