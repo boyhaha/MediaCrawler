@@ -225,13 +225,13 @@ def human_sleep(base: float):
     factor = get_time_factor()
 
     # 2. 微抖动（每次都有）
-    micro = random.uniform(0.2, 1.5)
+    micro = random.uniform(0, 3)
 
     # 3. 概率触发中抖动
-    mid = random.uniform(1, 3) if random.random() < 0.15 else 0
+    mid = random.uniform(3, 10) if random.random() < 0.15 else 0
 
     # 4. 概率触发大抖动（模拟人离开电脑）
-    large = random.uniform(5, 20) if random.random() < 0.03 else 0
+    large = random.uniform(10, 30) if random.random() < 0.03 else 0
 
     # 5. 合成最终 sleep
     sleep_time = (base + micro + mid + large) * factor

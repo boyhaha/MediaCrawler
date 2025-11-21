@@ -28,6 +28,7 @@ from playwright.async_api import BrowserContext, Page
 from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed
 
 import config
+from notification.qy_weixin import notify_final_error
 from tools import utils
 
 from .exception import DataFetchError
@@ -54,7 +55,9 @@ class WeiboClient:
         self.cookie_dict = cookie_dict
         self._image_agent_host = "https://i1.wp.com/"
 
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=5, max=300))
+    @retry(stop=stop_after_attempt(5),
+           wait=wait_exponential(multiplier=2, min=5, max=300),
+           retry_error_callback=notify_final_error)
     async def request(self, method, url, **kwargs) -> Union[Response, Dict]:
         enable_return_response = kwargs.pop("return_response", False)
         async with httpx.AsyncClient(proxy=self.proxy) as client:
@@ -67,7 +70,8 @@ class WeiboClient:
             data: Dict = response.json()
         except json.decoder.JSONDecodeError:
             # issue: #771 搜索接口会报错432， 多次重试 + 更新 h5 cookies
-            utils.logger.error(f"[WeiboClient.request] request {method}:{url} err code: {response.status_code} res:{response.text}")
+            utils.logger.error(
+                f"[WeiboClient.request] request {method}:{url} err code: {response.status_code} res:{response.text}")
             await self.playwright_page.goto(self._host)
             await asyncio.sleep(2)
             await self.update_cookies(browser_context=self.playwright_page.context)
@@ -130,7 +134,8 @@ class WeiboClient:
         cookie_str, cookie_dict = utils.convert_cookies(cookies)
         self.headers["Cookie"] = cookie_str
         self.cookie_dict = cookie_dict
-        utils.logger.info(f"[WeiboClient.update_cookies] Cookie updated successfully, total: {len(cookie_dict)} cookies")
+        utils.logger.info(
+            f"[WeiboClient.update_cookies] Cookie updated successfully, total: {len(cookie_dict)} cookies")
 
     async def get_note_by_keyword(
         self,
@@ -285,7 +290,9 @@ class WeiboClient:
                 else:
                     return response.content
             except httpx.HTTPError as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
-                utils.logger.error(f"[DouYinClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}")    # 保留原始异常类型名称，以便开发者调试
+                # 保留原始异常类型名称，以便开发者调试
+                utils.logger.error(
+                    f"[DouYinClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}")
                 return None
 
     async def get_creator_container_info(self, creator_id: str) -> Dict:
@@ -364,7 +371,7 @@ class WeiboClient:
         creator_info = await weibo_store.WeibostoreFactory.create_store().get_creator(creator_id)
         user_last_ts = 0
         if creator_info:
-            user_last_ts = (creator_info.last_modify_ts or 0 ) // 1000
+            user_last_ts = (creator_info.last_modify_ts or 0) // 1000
         user_last_ts = user_last_ts or utils.get_unix_timestamp() - 60 * 60 * 1
         return user_last_ts
 
@@ -391,22 +398,27 @@ class WeiboClient:
         last_modify_ts = await self.get_user_last_ts(creator_id)
         crawler_total_count = 0
         while notes_has_more:
-            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] Fetching notes for user_id:{creator_id} with since_id:{since_id} ...")
+            utils.logger.info(
+                f"[WeiboClient.get_all_notes_by_creator] Fetching notes for user_id:{creator_id} with since_id:{since_id} ...")
             notes_res = await self.get_notes_by_creator(creator_id, container_id, since_id)
             if not notes_res:
-                utils.logger.error(f"[WeiboClient.get_notes_by_creator] The current creator may have been banned by xhs, so they cannot access the data.")
+                utils.logger.error(
+                    f"[WeiboClient.get_notes_by_creator] The current creator may have been banned by xhs, so they cannot access the data.")
                 break
             since_id = notes_res.get("cardlistInfo", {}).get("since_id", "0")
             if "cards" not in notes_res:
-                utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] No 'notes' key found in response: {notes_res}")
+                utils.logger.info(
+                    f"[WeiboClient.get_all_notes_by_creator] No 'notes' key found in response: {notes_res}")
                 break
 
             notes = notes_res["cards"]
-            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] got user_id: {creator_id} notes len : {len(notes)}")
+            utils.logger.info(
+                f"[WeiboClient.get_all_notes_by_creator] got user_id: {creator_id} notes len : {len(notes)}")
             notes = [note for note in notes if note.get("card_type") == 9]
             is_continue = await self.batch_update_weibo_notes(notes, last_modify_ts)
             if not is_continue or since_id == "0" or not notes:
-                utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] Stopping fetch for user_id:{creator_id}. is_continue:{is_continue}, since_id:{since_id}, notes_len:{len(notes)}")
+                utils.logger.info(
+                    f"[WeiboClient.get_all_notes_by_creator] Stopping fetch for user_id:{creator_id}. is_continue:{is_continue}, since_id:{since_id}, notes_len:{len(notes)}")
                 break
 
             await asyncio.sleep(utils.human_sleep(crawl_interval))
@@ -433,7 +445,7 @@ class WeiboClient:
             if is_new:
                 await self.parse_note(note_item)
         return is_continue
-    
+
     async def parse_check(self, note_item: Dict, last_modify_ts: int):
         """
         解析单个微博帖子的详情
@@ -451,7 +463,7 @@ class WeiboClient:
         if utils.rfc2822_to_timestamp(mblog.get("created_at")) > last_modify_ts:
             is_new = True
         return is_top, is_new
-    
+
     async def parse_note(self, note_item: Dict) -> Dict:
         """
         解析单个微博帖子的详情
@@ -498,7 +510,7 @@ class WeiboClient:
         # TODO：批量保存
         utils.logger.info(f"[store.weibo.update_weibo_note] weibo note id:{note_id}, title:{clean_text[:24]} ...")
         await weibo_store.WeibostoreFactory.create_store().store_content(content_item=content_item)
-    
+
     async def _note_pics(self, mblog: Dict):
         """
         get note images
@@ -515,10 +527,10 @@ class WeiboClient:
             if not url:
                 continue
             _pic = {
-                    "pic_id": note_pic["pid"],
-                    "pic_url": url,
-                    "pic_path": "",
-                }
+                "pic_id": note_pic["pid"],
+                "pic_url": url,
+                "pic_path": "",
+            }
             if config.ENABLE_GET_MEIDAS:
                 content = await self.get_note_image(url)
                 await asyncio.sleep(config.CRAWL_INTERVAL)
