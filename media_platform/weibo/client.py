@@ -364,7 +364,7 @@ class WeiboClient:
         creator_info = await weibo_store.WeibostoreFactory.create_store().get_creator(creator_id)
         user_last_ts = 0
         if creator_info:
-            user_last_ts = creator_info.last_modify_ts or 0 // 1000
+            user_last_ts = (creator_info.last_modify_ts or 0 ) // 1000
         user_last_ts = user_last_ts or utils.get_unix_timestamp() - 60 * 60 * 1
         return user_last_ts
 
@@ -429,10 +429,9 @@ class WeiboClient:
             is_top, is_new = await self.parse_check(note_item, last_modify_ts)
             if not is_top and not is_new:  # 如果不是置顶且不是新发布的，就停止爬取
                 is_continue = False
-                # break
-            # if is_new:
-            #     await self.parse_note(note_item)
-            await self.parse_note(note_item)
+                break
+            if is_new:
+                await self.parse_note(note_item)
         return is_continue
     
     async def parse_check(self, note_item: Dict, last_modify_ts: int):

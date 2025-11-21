@@ -285,8 +285,8 @@ class WeiboCrawler(AbstractCrawler):
         Returns:
 
         """
-        utils.logger.info("[WeiboCrawler.get_creators_and_notes] Begin get weibo creators")
-        for user_id in random.shuffle(config.WEIBO_CREATOR_ID_LIST):
+        utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] {len(config.WEIBO_CREATOR_ID_LIST)} Begin get weibo creators")
+        for user_id in random.sample(config.WEIBO_CREATOR_ID_LIST, len(config.WEIBO_CREATOR_ID_LIST)):
             createor_info_res: Dict = await self.wb_client.get_creator_info_by_id(creator_id=user_id)
             if createor_info_res:
                 createor_info: Dict = createor_info_res.get("userInfo", {})
@@ -294,13 +294,14 @@ class WeiboCrawler(AbstractCrawler):
                 if not createor_info:
                     raise DataFetchError("Get creator info error")
 
+                last_modify_ts = utils.get_current_timestamp()
                 # Get all note information of the creator
                 all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
                     creator_id=user_id,
                     container_id=f"107603{user_id}",
                     crawl_interval=config.CRAWL_INTERVAL,
                 )
-                await weibo_store.save_creator(user_id, user_info=createor_info)
+                await weibo_store.save_creator(user_id, user_info=createor_info, last_modify_ts=last_modify_ts)
 
                 # 评论
                 # note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]

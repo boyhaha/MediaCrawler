@@ -173,7 +173,7 @@ async def update_weibo_note_image(picid: str, pic_content, extension_file_name):
     return await WeiboStoreImage().store_image({"pic_id": picid, "pic_content": pic_content, "extension_file_name": extension_file_name})
 
 
-async def save_creator(user_id: str, user_info: Dict):
+async def save_creator(user_id: str, user_info: Dict, last_modify_ts=0):
     """
     Save creator information to local
     Args:
@@ -193,7 +193,7 @@ async def save_creator(user_id: str, user_info: Dict):
         'follows': user_info.get('follow_count', ''),
         'fans': user_info.get('followers_count', ''),
         'tag_list': '',
-        "last_modify_ts": utils.get_current_timestamp(),
+        "last_modify_ts": last_modify_ts,
     }
     # utils.logger.info(f"[store.weibo.save_creator] creator:{local_db_item}")
     await WeibostoreFactory.create_store().store_creator(local_db_item)

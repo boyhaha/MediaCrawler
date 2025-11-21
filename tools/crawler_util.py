@@ -216,7 +216,7 @@ def get_time_factor():
     return 1.0
 
 
-async def human_sleep(base: float):
+def human_sleep(base: float):
     """
     base: 基础等待时间（如每条间隔 5 秒）
     """
